@@ -195,11 +195,14 @@ RUN for dir in /app/extensions /app/.agent /app/.agents; do \
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
  && chmod 755 /app/openclaw.mjs
 
+# Pre-create /data with node ownership so Railway volume mounts are writable.
+# Railway volumes are root-owned by default; this ensures uid 1000 can write.
+RUN mkdir -p /data/.openclaw /data/workspace && chown -R node:node /data
+
 ENV NODE_ENV=production
 
 # Security hardening: Run as non-root user
 # The node:22-bookworm image includes a 'node' user (uid 1000)
-# This reduces the attack surface by preventing container escape via root privileges
 USER node
 
 # Start gateway server with default config.
