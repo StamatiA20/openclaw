@@ -195,28 +195,25 @@ RUN for dir in /app/extensions /app/.agent /app/.agents; do \
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
  && chmod 755 /app/openclaw.mjs
 
-# Pre-create /data with node ownership so Railway volume mounts are writable.
-# Railway volumes are root-owned by default; this ensures uid 1000 can write.
-RUN mkdir -p /data/.openclaw /data/workspace && chown -R node:node /data
-
 ENV NODE_ENV=production
 
-# Security hardening: Run as non-root user
-# The node:22-bookworm image includes a 'node' user (uid 1000)
-USER node
+# Install gosu for secure privilege de-escalation in the entrypoint.
+# This is ~1MB and the standard Docker pattern for fixing volume permissions
+# before dropping to a non-root user.
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gosu && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* && \
+    gosu nobody true
+
+# Entrypoint: fix /data volume ownership then drop to the node user.
+# Railway bind-mounts volumes as root; this ensures uid 1000 can write.
+# Container starts as root, entrypoint drops to node via gosu.
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Start gateway server with default config.
-# Binds to loopback (127.0.0.1) by default for security.
-#
-# IMPORTANT: With Docker bridge networking (-p 18789:18789), loopback bind
-# makes the gateway unreachable from the host. Either:
-#   - Use --network host, OR
-#   - Override --bind to "lan" (0.0.0.0) and set auth credentials
-#
-# Built-in probe endpoints for container health checks:
-#   - GET /healthz (liveness) and GET /readyz (readiness)
-#   - aliases: /health and /ready
-# For external access from host/ingress, override bind to "lan" and set auth.
 HEALTHCHECK --interval=3m --timeout=10s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "openclaw.mjs", "gateway", "--allow-unconfigured"]
